@@ -26,10 +26,12 @@ package com.bignerdranch.cameraxmlkitblog
 import android.content.Context
 import android.graphics.Matrix
 import android.hardware.display.DisplayManager
+import android.os.Handler
+import android.os.HandlerThread
+import android.util.Rational
 import android.util.Size
 import android.view.*
-import androidx.camera.core.Preview
-import androidx.camera.core.PreviewConfig
+import androidx.camera.core.*
 import java.lang.ref.WeakReference
 import java.util.*
 
@@ -38,10 +40,15 @@ import java.util.*
  * [PreviewConfig], then instantiates a [Preview] which automatically
  * resizes and rotates reacting to config changes.
  */
-class AutoFitPreviewBuilder private constructor(config: PreviewConfig,
-                                                viewFinderRef: WeakReference<TextureView>) {
+class AutoFitPreviewAnalysis private constructor(
+  previewConfig: PreviewConfig,
+  analysisConfig: ImageAnalysisConfig,
+  viewFinderRef: WeakReference<TextureView>
+) {
   /** Public instance of preview use-case which can be used by consumers of this adapter */
-  val useCase: Preview
+  val previewUseCase: Preview
+  /** Public instance of analysis use-case which can be used by consumers of this adapter */
+  val analysisUseCase: ImageAnalysis
 
   /** Internal variable used to keep track of the use-case's output rotation */
   private var bufferRotation: Int = 0
@@ -83,11 +90,12 @@ class AutoFitPreviewBuilder private constructor(config: PreviewConfig,
     viewFinderDisplay = viewFinder.display.displayId
     viewFinderRotation = getDisplaySurfaceRotation(viewFinder.display) ?: 0
 
-    // Initialize public use-case with the given config
-    useCase = Preview(config)
+    // Initialize public use-cases with the given config
+    previewUseCase = Preview(previewConfig)
+    analysisUseCase = ImageAnalysis(analysisConfig)
 
     // Every time the view finder is updated, recompute layout
-    useCase.onPreviewOutputUpdateListener = Preview.OnPreviewOutputUpdateListener {
+    previewUseCase.onPreviewOutputUpdateListener = Preview.OnPreviewOutputUpdateListener {
       val viewFinder =
         viewFinderRef.get() ?: return@OnPreviewOutputUpdateListener
 
@@ -211,12 +219,30 @@ class AutoFitPreviewBuilder private constructor(config: PreviewConfig,
       else -> null
     }
 
-    /**
-     * Main entrypoint for users of this class: instantiates the adapter and returns an instance
-     * of [Preview] which automatically adjusts in size and rotation to compensate for
-     * config changes.
-     */
-    fun build(config: PreviewConfig, viewFinder: TextureView) =
-      AutoFitPreviewBuilder(config, WeakReference(viewFinder)).useCase
+    fun build(screenSize: Size, aspectRatio: Rational, rotation: Int, viewFinder: TextureView): AutoFitPreviewAnalysis {
+      val previewConfig = createPreviewConfig(screenSize, aspectRatio, rotation)
+      val analysisConfig = createAnalysisConfig(screenSize, aspectRatio, rotation)
+      return AutoFitPreviewAnalysis(previewConfig, analysisConfig, WeakReference(viewFinder))
+    }
+
+    private fun createPreviewConfig(screenSize: Size, aspectRatio: Rational, rotation: Int): PreviewConfig {
+      return PreviewConfig.Builder().apply {
+        setLensFacing(CameraX.LensFacing.FRONT)
+        setTargetResolution(screenSize)
+        setTargetAspectRatio(aspectRatio)
+        setTargetRotation(rotation)
+      }.build()
+    }
+
+    private fun createAnalysisConfig(screenSize: Size, aspectRatio: Rational, rotation: Int): ImageAnalysisConfig {
+      return ImageAnalysisConfig.Builder().apply {
+        setLensFacing(CameraX.LensFacing.FRONT)
+        setImageReaderMode(ImageAnalysis.ImageReaderMode.ACQUIRE_LATEST_IMAGE)
+        setTargetRotation(rotation)
+        setTargetResolution(screenSize)
+        setTargetAspectRatio(aspectRatio)
+      }.build()
+    }
+
   }
 }

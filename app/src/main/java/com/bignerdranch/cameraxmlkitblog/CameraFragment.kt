@@ -34,5 +34,9 @@ class CameraFragment : Fragment() {
     val screenSize = Size(displayMetrics.widthPixels, displayMetrics.heightPixels)
     val aspectRatio = Rational(displayMetrics.widthPixels, displayMetrics.heightPixels)
     val rotation = cameraView.display.rotation
+
+    val autoFitPreviewAnalysis = AutoFitPreviewAnalysis.build(screenSize, aspectRatio, rotation, cameraView)
+
+    CameraX.bindToLifecycle(this, autoFitPreviewAnalysis.previewUseCase, autoFitPreviewAnalysis.analysisUseCase)
   }
 }
