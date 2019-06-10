@@ -26,12 +26,19 @@ package com.bignerdranch.cameraxmlkitblog
 import android.content.Context
 import android.graphics.Matrix
 import android.hardware.display.DisplayManager
-import android.os.Handler
-import android.os.HandlerThread
+import android.util.Log
 import android.util.Rational
 import android.util.Size
 import android.view.*
 import androidx.camera.core.*
+import com.google.android.gms.tasks.OnFailureListener
+import com.google.android.gms.tasks.OnSuccessListener
+import com.google.firebase.ml.vision.FirebaseVision
+import com.google.firebase.ml.vision.common.FirebaseVisionImage
+import com.google.firebase.ml.vision.common.FirebaseVisionImageMetadata
+import com.google.firebase.ml.vision.face.FirebaseVisionFace
+import com.google.firebase.ml.vision.face.FirebaseVisionFaceDetector
+import com.google.firebase.ml.vision.face.FirebaseVisionFaceDetectorOptions
 import java.lang.ref.WeakReference
 import java.util.*
 
@@ -92,7 +99,9 @@ class AutoFitPreviewAnalysis private constructor(
 
     // Initialize public use-cases with the given config
     previewUseCase = Preview(previewConfig)
-    analysisUseCase = ImageAnalysis(analysisConfig)
+    analysisUseCase = ImageAnalysis(analysisConfig).apply {
+      analyzer = FaceAnalyzer()
+    }
 
     // Every time the view finder is updated, recompute layout
     previewUseCase.onPreviewOutputUpdateListener = Preview.OnPreviewOutputUpdateListener {
@@ -243,6 +252,41 @@ class AutoFitPreviewAnalysis private constructor(
         setTargetAspectRatio(aspectRatio)
       }.build()
     }
+  }
+}
 
+private class FaceAnalyzer : ImageAnalysis.Analyzer {
+
+  private val faceDetector: FirebaseVisionFaceDetector by lazy {
+    val options = FirebaseVisionFaceDetectorOptions.Builder()
+      .setContourMode(FirebaseVisionFaceDetectorOptions.ALL_CONTOURS)
+      .build()
+
+    FirebaseVision.getInstance().getVisionFaceDetector(options)
+  }
+
+  private val successListener = OnSuccessListener<List<FirebaseVisionFace>> { faces ->
+    Log.e("FaceAnalyzer", "Analyzer detected faces with size: ${faces.size}")
+  }
+  private val failureListener = OnFailureListener { e ->
+    Log.e("FaceAnalyzer", "Face analysis failure.", e)
+  }
+
+  override fun analyze(image: ImageProxy?, rotationDegrees: Int) {
+    val cameraImage = image?.image ?: return
+    val firebaseVisionImage = FirebaseVisionImage.fromMediaImage(cameraImage, getRotationConstant(rotationDegrees))
+
+    val result = faceDetector.detectInImage(firebaseVisionImage)
+      .addOnSuccessListener(successListener)
+      .addOnFailureListener(failureListener)
+  }
+
+  private fun getRotationConstant(rotationDegrees: Int): Int {
+    return when (rotationDegrees) {
+      90 -> FirebaseVisionImageMetadata.ROTATION_90
+      180 -> FirebaseVisionImageMetadata.ROTATION_180
+      270 -> FirebaseVisionImageMetadata.ROTATION_270
+      else -> FirebaseVisionImageMetadata.ROTATION_0
+    }
   }
 }
