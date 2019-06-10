@@ -26,6 +26,8 @@ package com.bignerdranch.cameraxmlkitblog
 import android.content.Context
 import android.graphics.Matrix
 import android.hardware.display.DisplayManager
+import android.os.Handler
+import android.os.HandlerThread
 import android.util.Log
 import android.util.Rational
 import android.util.Size
@@ -41,6 +43,7 @@ import com.google.firebase.ml.vision.face.FirebaseVisionFaceDetector
 import com.google.firebase.ml.vision.face.FirebaseVisionFaceDetectorOptions
 import java.lang.ref.WeakReference
 import java.util.*
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Builder for [Preview] that takes in a [WeakReference] of the view finder and
@@ -250,12 +253,17 @@ class AutoFitPreviewAnalysis private constructor(
         setTargetRotation(rotation)
         setTargetResolution(screenSize)
         setTargetAspectRatio(aspectRatio)
+
+        val analysisThread = HandlerThread("FaceDetectionThread").apply { start() }
+        setCallbackHandler(Handler(analysisThread.looper))
       }.build()
     }
   }
 }
 
 private class FaceAnalyzer : ImageAnalysis.Analyzer {
+
+  private var isAnalyzing = AtomicBoolean(false)
 
   private val faceDetector: FirebaseVisionFaceDetector by lazy {
     val options = FirebaseVisionFaceDetectorOptions.Builder()
@@ -266,14 +274,19 @@ private class FaceAnalyzer : ImageAnalysis.Analyzer {
   }
 
   private val successListener = OnSuccessListener<List<FirebaseVisionFace>> { faces ->
+    isAnalyzing.set(false)
     Log.e("FaceAnalyzer", "Analyzer detected faces with size: ${faces.size}")
   }
   private val failureListener = OnFailureListener { e ->
+    isAnalyzing.set(false)
     Log.e("FaceAnalyzer", "Face analysis failure.", e)
   }
 
   override fun analyze(image: ImageProxy?, rotationDegrees: Int) {
     val cameraImage = image?.image ?: return
+
+    if (isAnalyzing.get()) return
+    isAnalyzing.set(true)
     val firebaseVisionImage = FirebaseVisionImage.fromMediaImage(cameraImage, getRotationConstant(rotationDegrees))
 
     val result = faceDetector.detectInImage(firebaseVisionImage)
