@@ -232,4 +232,6 @@ gradle-app.setting
 ### Gradle Patch ###
 **/build/
 
+app/google-services.json
+
 # End of https://www.gitignore.io/api/gradle,kotlin,android,androidstudio
