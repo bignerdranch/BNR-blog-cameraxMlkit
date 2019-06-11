@@ -14,11 +14,13 @@ import androidx.fragment.app.Fragment
 class CameraFragment : Fragment() {
 
   private lateinit var cameraView: TextureView
+  private lateinit var overlayView: FacePointsView
 
   override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
     val view = inflater.inflate(R.layout.fragment_camera, container, false)
 
     cameraView = view.findViewById(R.id.camera_view)
+    overlayView = view.findViewById(R.id.face_points_view)
 
     cameraView.post {
       setUpCameraX()
@@ -35,7 +37,7 @@ class CameraFragment : Fragment() {
     val aspectRatio = Rational(displayMetrics.widthPixels, displayMetrics.heightPixels)
     val rotation = cameraView.display.rotation
 
-    val autoFitPreviewAnalysis = AutoFitPreviewAnalysis.build(screenSize, aspectRatio, rotation, cameraView)
+    val autoFitPreviewAnalysis = AutoFitPreviewAnalysis.build(screenSize, aspectRatio, rotation, cameraView, overlayView)
 
     CameraX.bindToLifecycle(this, autoFitPreviewAnalysis.previewUseCase, autoFitPreviewAnalysis.analysisUseCase)
   }

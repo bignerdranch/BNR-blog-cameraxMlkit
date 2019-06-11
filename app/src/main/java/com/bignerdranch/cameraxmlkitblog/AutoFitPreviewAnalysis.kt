@@ -25,6 +25,7 @@ package com.bignerdranch.cameraxmlkitblog
 
 import android.content.Context
 import android.graphics.Matrix
+import android.graphics.PointF
 import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.HandlerThread
@@ -39,6 +40,7 @@ import com.google.firebase.ml.vision.FirebaseVision
 import com.google.firebase.ml.vision.common.FirebaseVisionImage
 import com.google.firebase.ml.vision.common.FirebaseVisionImageMetadata
 import com.google.firebase.ml.vision.face.FirebaseVisionFace
+import com.google.firebase.ml.vision.face.FirebaseVisionFaceContour
 import com.google.firebase.ml.vision.face.FirebaseVisionFaceDetector
 import com.google.firebase.ml.vision.face.FirebaseVisionFaceDetectorOptions
 import java.lang.ref.WeakReference
@@ -53,7 +55,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 class AutoFitPreviewAnalysis private constructor(
   previewConfig: PreviewConfig,
   analysisConfig: ImageAnalysisConfig,
-  viewFinderRef: WeakReference<TextureView>
+  viewFinderRef: WeakReference<TextureView>,
+  overlayRef: WeakReference<FacePointsView>
 ) {
   /** Public instance of preview use-case which can be used by consumers of this adapter */
   val previewUseCase: Preview
@@ -103,7 +106,11 @@ class AutoFitPreviewAnalysis private constructor(
     // Initialize public use-cases with the given config
     previewUseCase = Preview(previewConfig)
     analysisUseCase = ImageAnalysis(analysisConfig).apply {
-      analyzer = FaceAnalyzer()
+      analyzer = FaceAnalyzer().apply {
+        pointsListListener = { points ->
+          overlayRef.get()?.points = points
+        }
+      }
     }
 
     // Every time the view finder is updated, recompute layout
@@ -231,10 +238,10 @@ class AutoFitPreviewAnalysis private constructor(
       else -> null
     }
 
-    fun build(screenSize: Size, aspectRatio: Rational, rotation: Int, viewFinder: TextureView): AutoFitPreviewAnalysis {
+    fun build(screenSize: Size, aspectRatio: Rational, rotation: Int, viewFinder: TextureView, overlay: FacePointsView): AutoFitPreviewAnalysis {
       val previewConfig = createPreviewConfig(screenSize, aspectRatio, rotation)
       val analysisConfig = createAnalysisConfig(screenSize, aspectRatio, rotation)
-      return AutoFitPreviewAnalysis(previewConfig, analysisConfig, WeakReference(viewFinder))
+      return AutoFitPreviewAnalysis(previewConfig, analysisConfig, WeakReference(viewFinder), WeakReference(overlay))
     }
 
     private fun createPreviewConfig(screenSize: Size, aspectRatio: Rational, rotation: Int): PreviewConfig {
@@ -264,6 +271,7 @@ class AutoFitPreviewAnalysis private constructor(
 private class FaceAnalyzer : ImageAnalysis.Analyzer {
 
   private var isAnalyzing = AtomicBoolean(false)
+  var pointsListListener: ((List<PointF>) -> Unit)? = null
 
   private val faceDetector: FirebaseVisionFaceDetector by lazy {
     val options = FirebaseVisionFaceDetectorOptions.Builder()
@@ -275,7 +283,15 @@ private class FaceAnalyzer : ImageAnalysis.Analyzer {
 
   private val successListener = OnSuccessListener<List<FirebaseVisionFace>> { faces ->
     isAnalyzing.set(false)
-    Log.e("FaceAnalyzer", "Analyzer detected faces with size: ${faces.size}")
+
+    val points = mutableListOf<PointF>()
+
+    for (face in faces) {
+      val contours = face.getContour(FirebaseVisionFaceContour.ALL_POINTS)
+      points += contours.points.map { PointF(it.x, it.y) }
+    }
+
+    pointsListListener?.invoke(points)
   }
   private val failureListener = OnFailureListener { e ->
     isAnalyzing.set(false)
