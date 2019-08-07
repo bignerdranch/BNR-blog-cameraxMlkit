@@ -73,6 +73,10 @@ class AutoFitPreviewAnalysis private constructor(
   private var viewFinderDimens: Size = Size(0, 0)
   /** Internal variable used to keep track of the view's display */
   private var viewFinderDisplay: Int = -1
+  /** Internal variable used to keep track of the image analysis dimension */
+  private var cachedAnalysisDimens = Size(0, 0)
+  /** Internal variable used to keep track of the calculated dimension of the preview image */
+  private var cachedTargetDimens = Size(0, 0)
 
   /** Internal reference of the [DisplayManager] */
   private lateinit var displayManager: DisplayManager
@@ -90,6 +94,7 @@ class AutoFitPreviewAnalysis private constructor(
         val display = displayManager.getDisplay(displayId)
         val rotation = getDisplaySurfaceRotation(display)
         updateTransform(viewFinder, rotation, bufferDimens, viewFinderDimens)
+        updateOverlayTransform(overlayRef.get(), cachedAnalysisDimens)
       }
     }
   }
@@ -110,6 +115,9 @@ class AutoFitPreviewAnalysis private constructor(
         pointsListListener = { points ->
           overlayRef.get()?.points = points
         }
+        analysisSizeListener = {
+          updateOverlayTransform(overlayRef.get(), it)
+        }
       }
     }
 
@@ -127,6 +135,7 @@ class AutoFitPreviewAnalysis private constructor(
       bufferRotation = it.rotationDegrees
       val rotation = getDisplaySurfaceRotation(viewFinder.display)
       updateTransform(viewFinder, rotation, it.textureSize, viewFinderDimens)
+      updateOverlayTransform(overlayRef.get(), cachedAnalysisDimens)
     }
 
     // Every time the provided texture view changes, recompute layout
@@ -135,6 +144,7 @@ class AutoFitPreviewAnalysis private constructor(
       val newViewFinderDimens = Size(right - left, bottom - top)
       val rotation = getDisplaySurfaceRotation(viewFinder.display)
       updateTransform(viewFinder, rotation, bufferDimens, newViewFinderDimens)
+      updateOverlayTransform(overlayRef.get(), cachedAnalysisDimens)
     }
 
     // Every time the orientation of device changes, recompute layout
@@ -217,6 +227,9 @@ class AutoFitPreviewAnalysis private constructor(
       scaledWidth = Math.round(viewFinderDimens.height * bufferRatio)
     }
 
+    // save the scaled dimens for use with the overlay
+    cachedTargetDimens = Size(scaledWidth, scaledHeight)
+
     // Compute the relative scale value
     val xScale = scaledWidth / viewFinderDimens.width.toFloat()
     val yScale = scaledHeight / viewFinderDimens.height.toFloat()
@@ -226,6 +239,57 @@ class AutoFitPreviewAnalysis private constructor(
 
     // Finally, apply transformations to our TextureView
     textureView.setTransform(matrix)
+  }
+
+  private fun updateOverlayTransform(overlayView: FacePointsView?, size: Size) {
+    if (overlayView == null) return
+
+    if (size == cachedAnalysisDimens) {
+      // nothing has changed since the last update, so return early
+      return
+    } else {
+      cachedAnalysisDimens = size
+    }
+
+    Log.d("autofit", "cachedAnalysisDimens are now $cachedAnalysisDimens")
+    Log.d("autofit", "cachedTargetDimens are now $cachedTargetDimens")
+    Log.d("autofit", "viewFinderDimens are now $viewFinderDimens")
+
+    overlayView.transform = overlayMatrix()
+  }
+
+  private fun overlayMatrix(): Matrix {
+    val matrix = Matrix()
+
+    // ---- SCALE the overlay to match the preview ----
+    // Buffers are rotated relative to the device's 'natural' orientation: swap width and height
+    val scale = cachedTargetDimens.height.toFloat() / cachedAnalysisDimens.width.toFloat()
+
+    // Scale input buffers to fill the view finder
+    matrix.preScale(scale, scale)
+
+    // ---- MOVE the overlay ----
+    // move all the points of the overlay so that the relative (0,0) point is at the top-left of the preview
+    val xTranslate: Float
+    val yTranslate: Float
+    if (viewFinderDimens.width > viewFinderDimens.height) {
+      // portrait: viewFinder width corresponds to target height
+      xTranslate = (viewFinderDimens.width - cachedTargetDimens.height) / 2f
+      yTranslate = (viewFinderDimens.height - cachedTargetDimens.width) / 2f
+    } else {
+      // landscape: viewFinder width corresponds to target width
+      xTranslate = (viewFinderDimens.width - cachedTargetDimens.width) / 2f
+      yTranslate = (viewFinderDimens.height - cachedTargetDimens.height) / 2f
+    }
+    matrix.postTranslate(xTranslate, yTranslate)
+
+    // ---- MIRROR the overlay ----
+    // Compute the center of the view finder
+    val centerX = viewFinderDimens.width / 2f
+    val centerY = viewFinderDimens.height / 2f
+    matrix.postScale(-1f, 1f, centerX, centerY)
+
+    return matrix
   }
 
   companion object {
@@ -272,6 +336,7 @@ private class FaceAnalyzer : ImageAnalysis.Analyzer {
 
   private var isAnalyzing = AtomicBoolean(false)
   var pointsListListener: ((List<PointF>) -> Unit)? = null
+  var analysisSizeListener: ((Size) -> Unit)? = null
 
   private val faceDetector: FirebaseVisionFaceDetector by lazy {
     val options = FirebaseVisionFaceDetectorOptions.Builder()
@@ -303,6 +368,9 @@ private class FaceAnalyzer : ImageAnalysis.Analyzer {
 
     if (isAnalyzing.get()) return
     isAnalyzing.set(true)
+
+    analysisSizeListener?.invoke(Size(image.width, image.height))
+
     val firebaseVisionImage = FirebaseVisionImage.fromMediaImage(cameraImage, getRotationConstant(rotationDegrees))
 
     val result = faceDetector.detectInImage(firebaseVisionImage)
